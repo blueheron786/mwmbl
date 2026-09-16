@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from redis import Redis
 
 from mwmbl.count_urls import get_counts, get_domain_result_count
-from mwmbl.crawler.batch import HashedBatch, Results
+from mwmbl.crawler.batch import HashedBatch, Result, Results
 from mwmbl.crawler.urls import URLDatabase
 from mwmbl.indexer.update_urls import get_datetime_from_timestamp
 from mwmbl.utils import utc_today
@@ -94,6 +94,10 @@ class StatsManager:
         self.redis = redis
 
     def record_batch(self, hashed_batch: HashedBatch):
+        """
+        Legacy stats method for the old crawler. Kept for now so we get accurate stats.
+        We switched to using a new crawler, which uses :meth:`record_results` instead.
+        """
         date_time = get_datetime_from_timestamp(hashed_batch.timestamp)
 
         num_crawled_urls = sum(1 for item in hashed_batch.items if item.content is not None)
@@ -115,6 +119,11 @@ class StatsManager:
         user_count_key = USER_COUNT_KEY.format(date=date)
         self.redis.zincrby(user_count_key, num_crawled_urls, hashed_batch.user_id_hash)
         self.redis.expire(user_count_key, SHORT_EXPIRE_SECONDS)
+
+        # Record common stats across new/old crawler upload methods
+        user_id = hashed_batch.user_id_hash
+        username = ????
+        self.record_common_upload_stats(len(hashed_batch.items), username)
 
         start_time = datetime.now(timezone.utc)
         host_key = HOST_COUNT_KEY.format(date=date)
@@ -292,7 +301,9 @@ class StatsManager:
         return domain_stats
 
     def record_results(self, results: Results, username: str) -> None:
-        num_results = len(results.results)
+        self.record_common_upload_stats(len(results.results), username)
+
+    def record_common_upload_stats(self, num_results:int, username:str) -> None:
         result_count_key = RESULTS_COUNT_KEY.format(date=utc_today())
         self.redis.incrby(result_count_key, num_results)
         self.redis.expire(result_count_key, LONG_EXPIRE_SECONDS)
